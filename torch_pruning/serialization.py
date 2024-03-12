@@ -4,7 +4,7 @@ import pickle
 
 load = torch.load
 save = torch.save
-
+# 输入一个PyTorch模型，返回包含模型状态和属性的字典。
 def state_dict(model: torch.nn.Module):
     """ Returns a dictionary containing the state, attributions of a module.
     """

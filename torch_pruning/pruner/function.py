@@ -6,6 +6,7 @@ from typing import Sequence, Tuple
 
 from .. import ops
 
+## 定义所有可用的剪枝功能类名称
 __all__=[
     'BasePruningFunc',
     'PrunerBox',
@@ -33,7 +34,7 @@ __all__=[
     'prune_instancenorm_out_channels',
     'prune_instancenorm_in_channels',
 ]
-
+# 基础剪枝功能类，用作所有特定层剪枝功能的抽象基类
 class BasePruningFunc(ABC):
     """ Base class for layer pruner.
     It should provide the following functionalities:
@@ -55,7 +56,11 @@ class BasePruningFunc(ABC):
 
     If prune_out_channels != prune_in_channels, there will be no intra-layer dependency.
     """
-    TARGET_MODULES = ops.TORCH_OTHERS  # None
+    """
+    BasePruningFunc 是所有层剪枝功能的抽象基类。它定义了基本的剪枝接口，包括剪枝输出通道、剪枝输入通道、获取输出通道数和输入通道数的方法。
+    派生类需要实现这些方法以支持不同类型的神经网络层的剪枝。
+    """
+    TARGET_MODULES = ops.TORCH_OTHERS  # None # 默认目标模块设置为 None 或其他特定类型
 
     def __init__(self, pruning_dim=1):
         self.pruning_dim = pruning_dim
@@ -104,6 +109,7 @@ class BasePruningFunc(ABC):
         return 1
 
     def _prune_parameter_and_grad(self, weight, keep_idxs, pruning_dim):
+        # 剪枝给定维度的参数及其梯度
         pruned_weight = torch.nn.Parameter(torch.index_select(weight, pruning_dim, torch.LongTensor(keep_idxs).to(weight.device).contiguous()))
         if weight.grad is not None:
             pruned_weight.grad = torch.index_select(weight.grad, pruning_dim, torch.LongTensor(keep_idxs).to(weight.device))

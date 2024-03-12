@@ -1,11 +1,12 @@
 import torch.nn as nn
 from enum import IntEnum
 
+# 一个空的多头注意力（Multi-Head Attention）模块，用作占位符。
 class DummyMHA(nn.Module):
     def __init__(self):
         super(DummyMHA, self).__init__()
 
-
+# 代表一个自定义操作的模块，op_class 参数指定了操作的类。
 class _CustomizedOp(nn.Module):
     def __init__(self, op_class):
         self.op_cls = op_class
@@ -13,7 +14,7 @@ class _CustomizedOp(nn.Module):
     def __repr__(self):
         return "CustomizedOp({})".format(str(self.op_cls))
     
-
+# 代表一个拼接（concatenation）操作的模块。offsets 和 concat_sizes 分别记录拼接操作的偏移量和各输入部分的大小。id 为操作的唯一标识。
 class _ConcatOp(nn.Module):
     def __init__(self, id):
         super(_ConcatOp, self).__init__()
@@ -24,7 +25,7 @@ class _ConcatOp(nn.Module):
     def __repr__(self):
         return "_ConcatOp_{}({})".format(self.id, self.offsets)
 
-
+# 代表一个分割（split）操作的模块。offsets 和 split_sizes 类似地记录分割操作的信息。
 class _SplitOp(nn.Module):
     def __init__(self, id):
         super(_SplitOp, self).__init__()
@@ -35,7 +36,7 @@ class _SplitOp(nn.Module):
     def __repr__(self):
         return "_SplitOp_{}({})".format(self.id,self.offsets)
 
-
+# 代表一个解绑（unbind）操作的模块，类似于分割操作。
 class _UnbindOp(nn.Module):
     def __init__(self, id):
         super(_UnbindOp, self).__init__()
@@ -45,7 +46,7 @@ class _UnbindOp(nn.Module):
 
     def __repr__(self):
         return "_UnbindOp_{}({})".format(self.id,self.offsets)
-    
+# 代表一个重塑（reshape）操作的模块。
 class _ReshapeOp(nn.Module):
     def __init__(self, id):
         super(_ReshapeOp, self).__init__()
@@ -53,7 +54,7 @@ class _ReshapeOp(nn.Module):
     def __repr__(self):
         return "_Reshape_{}()".format(self.id)
 
-
+# 代表一个元素级操作的模块，如加、减、乘、除等。_grad_fn 记录了梯度函数的名称
 class _ElementWiseOp(nn.Module):
     def __init__(self, id, grad_fn):
         super(_ElementWiseOp, self).__init__()
@@ -65,6 +66,7 @@ class _ElementWiseOp(nn.Module):
 
 ######################################################
 # Dummy Pruners
+# 一个基础的剪枝器类，提供了基本的剪枝接口和方法，但实际上不执行任何剪枝操作。其他特定的剪枝器类继承自这个类。
 class DummyPruner(object):
     def __call__(self, layer, *args, **kargs):
         return layer
@@ -150,7 +152,7 @@ class ElementWisePruner(DummyPruner):
 class CustomizedPruner(DummyPruner):
     pass
 
-
+# 定义了不同类型的 PyTorch 层和操作的引用，便于在其他地方通过类型判断和处理。
 # Standard Modules
 TORCH_CONV = nn.modules.conv._ConvNd
 TORCH_BATCHNORM = nn.modules.batchnorm._BatchNorm
@@ -168,7 +170,7 @@ except:
     TORCH_MHA = DummyMHA  # for pytorch w/o MultiHeadAttention
 TORCH_OTHERS = None
 
-
+# 定义了不同操作类型的枚举值，用于在依赖图和剪枝逻辑中区分处理不同的层和操作。
 class OPTYPE(IntEnum):
     CONV = 0
     BN = 1
@@ -189,7 +191,7 @@ class OPTYPE(IntEnum):
     IN = 16  # nn.InstanceNorm
     UNBIND = 17
 
-
+# 根据模块实例确定其操作类型（如卷积、批量归一化等），返回对应的 OPTYPE 枚举值。
 def module2type(module):
     if isinstance(module, TORCH_CONV):
         if module.groups == module.out_channels and module.out_channels > 1:
@@ -229,7 +231,7 @@ def module2type(module):
     else:
         return OPTYPE.ELEMENTWISE
 
-
+# 根据操作类型的 OPTYPE 枚举值返回对应的 PyTorch 类或自定义操作类
 def type2class(op_type):
     if op_type == OPTYPE.CONV or op_type==OPTYPE.DEPTHWISE_CONV:
         return TORCH_CONV

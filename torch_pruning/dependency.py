@@ -11,6 +11,14 @@ __all__ = ["Dependency", "Group", "DependencyGraph"]
 INDEX_MAPPING_PLACEHOLDER = None
 MAX_RECURSION_DEPTH = 500
 
+
+# Node 类
+# 代表依赖图中的一个节点，对应于模型中的一个层（nn.Module）。
+# inputs 和 outputs 分别存储输入和输出节点，表示数据流动的路径。
+# module 是对应的 nn.Module 对象，grad_fn 是该层输出的梯度函数，用于构建计算图。
+# dependencies 存储与该节点相关的依赖关系。
+# enable_index_mapping 表示是否启用索引映射，用于处理如拼接（concat）或分割（split）操作对索引的特殊处理。
+# pruning_dim 指明了剪枝操作应该作用于哪一个维度。
 class Node(object):
     """ Node of DepGraph
     """
@@ -71,11 +79,14 @@ class Node(object):
         fmt = "-" * 32 + "\n"
         return fmt
 
-
+# Edge 是一个空类，用于增强代码可读性，表示依赖图中的边。
 class Edge(): # for readability
     pass
 
-
+"""
+Dependency 
+继承自 Edge，表示层间的依赖关系。每个 Dependency 对象包含一个触发函数 (trigger) 和一个处理函数 (handler)，分别对应于源节点（source）的剪枝操作和目标节点（target）的修复操作。
+"""
 class Dependency(Edge):
     def __init__(
         self,
@@ -140,7 +151,11 @@ class Dependency(Edge):
     def __hash__(self):
         return hash((self.source, self.target, self.trigger, self.handler))
 
-
+"""
+Group 类
+表示一组相互依赖的层，这些层在剪枝时需要一起考虑。每个组包含多个 Dependency 对象和对应的剪枝索引。
+提供了 prune 方法用于执行组内的剪枝操作。
+"""
 class Group(object):
     """A group that contains dependencies and pruning indices.   
     Each element is defined as as namedtuple('_helpers.GroupItem'. 
@@ -260,8 +275,12 @@ class Group(object):
 
     def __call__(self):
         return self.prune()
-
-
+"""
+DependencyGraph 类
+表示整个模型的依赖图。该类提供了构建依赖图、注册自定义剪枝函数、执行剪枝等方法。
+支持注册自定义剪枝操作（register_customized_layer），以及通过 get_pruning_group 方法获取给定模块的剪枝组。
+还提供了更新索引映射（update_index_mapping）的功能，以适应复杂操作（如拼接、分割）对索引的影响。
+"""
 class DependencyGraph(object):
 
     def __init__(self):
@@ -304,7 +323,7 @@ class DependencyGraph(object):
                 pruning_fn = pruner.prune_in_channels
             group = self.get_pruning_group(module, pruning_fn, pruning_idx)
             group.prune(record_history=False)
-            
+    # build_dependency 方法通过追踪模型的前向传播来构建依赖图。
     def build_dependency(
         self,
         model: torch.nn.Module,
