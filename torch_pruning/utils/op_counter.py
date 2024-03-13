@@ -17,12 +17,14 @@ try:
     has_timm = True
 except:
     has_timm = False
-
+# layer_wise: 一个布尔值，指示是否逐层返回FLOPs和参数数量的详细信息。
+# count_ops_and_params: 这是主要的公共接口，用于计算模型的FLOPs和参数数量。它首先对模型进行深拷贝以避免修改原始模型，然后使用特定的钩子（hooks）来累加不同层的FLOPs。
 @torch.no_grad()
 def count_ops_and_params(model, example_inputs, layer_wise=False):
     global CUSTOM_MODULES_MAPPING
     ori_model = model 
     model = copy.deepcopy(model) # deepcopy to avoid changing the original model
+    # add_flops_counting_methods函数（未在代码片段中给出）应该是将计算FLOPs的方法添加到模型的每一层。这个函数不是PyTorch的标准部分，可能是自定义的或来自第三方库。
     flops_model = add_flops_counting_methods(model)
     flops_model.eval()
     flops_model.start_flops_count(ost=sys.stdout, verbose=False,
@@ -36,6 +38,7 @@ def count_ops_and_params(model, example_inputs, layer_wise=False):
     flops_count, params_count, _layer_flops, _layer_params = flops_model.compute_average_flops_cost()
     layer_flops = {}
     layer_params = {}
+    # 计算模型的总FLOPs和参数数量。假设compute_average_flops_cost是一个自定义方法，用于返回整个模型的FLOPs和参数数量以及可能的每层详细信息。
     for ori_m, m in zip(ori_model.modules(), model.modules()):
         layer_flops[ori_m] = _layer_flops.get(m)
         layer_params[ori_m] = _layer_params.get(m)
@@ -386,7 +389,7 @@ def get_model_parameters_number(model):
     params_num = sum(p.numel() for p in model.parameters())
     return params_num
 
-
+# add_flops_counting_methods: 向模型对象动态添加计算FLOPs的方法。这些方法包括启动和停止FLOPs计数、重置计数、以及计算平均FLOPs成本。
 def add_flops_counting_methods(net_main_module):
     # adding additional methods to the existing module object,
     # this is done this way so that each function has access to self object

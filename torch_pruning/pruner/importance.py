@@ -32,6 +32,12 @@ __all__ = [
     "RandomImportance",
 ]
 
+"""
+Importance（抽象基类）：建立了一个框架，
+以评估tp.Dependency.Group中参数的重要性。
+它返回一个表示每个通道重要性分数的1-D张量。
+实现必须定义__call__方法，该方法基于组的特性计算这些分数。
+""" 
 class Importance(abc.ABC):
     """ Estimate the importance of a tp.Dependency.Group, and return an 1-D per-channel importance score.
 
@@ -52,7 +58,9 @@ class Importance(abc.ABC):
     def __call__(self, group: Group) -> torch.Tensor: 
         raise NotImplementedError
 
-
+# 实现基于范数的重要性计算，使用范数（例如L1、L2）
+# 计算组内每个通道或维度的重要性。它非常灵活，支持不同的范数和组内不同的减少策略。
+# 这个类是为几个派生重要性估计器提供基础，这些估计器为特定应用调整其参数。
 class GroupNormImportance(Importance):
     """ A general implementation of magnitude importance. By default, it calculates the group L2-norm for each channel/dim.
         It supports several variants like:
@@ -80,6 +88,33 @@ class GroupNormImportance(Importance):
                 min_score = imp_score.min() 
             ``` 
     """
+
+    """
+    参数说明
+        model: 待剪枝的模型。
+        example_inputs: 用于图追踪的虚拟输入。
+        importance: 重要性估计器，用于估计参数或组的重要性。
+        reg: 正则化系数，默认为1e-5。
+        alpha: 正则化缩放因子，范围在[2^0, 2^alpha]之间，默认为4。
+        global_pruning: 是否启用全局剪枝，默认为False。
+        pruning_ratio: 全局通道稀疏度，也称为剪枝比率，默认为0.5。
+        pruning_ratio_dict: 特定层的剪枝比率，如果指定，将覆盖pruning_ratio的设置。
+        max_pruning_ratio: 最大剪枝比率，默认为1.0。
+        iterative_steps: 迭代剪枝的步数，默认为1。
+        iterative_pruning_ratio_scheduler: 迭代剪枝的调度器，默认为线性调度器。
+        ignored_layers: 忽略的模块，默认为None。
+        round_to: 将通道数四舍五入到最接近round_to的倍数，默认为None。
+        以及更多高级和已弃用的参数。
+        方法说明
+        __init__: 类的构造函数，初始化所有参数和内部状态。
+        update_regularizor: 更新正则化器，重新获取所有待剪枝的组。
+        regularize: 对给定的模型执行正则化操作。这一步骤在剪枝过程中非常关键，因为它通过调整梯度来引导剪枝过程，以期最小化对模型性能的影响。
+    """
+    # p: 范数的阶数，如L1或L2。
+    # group_reduction: 参数组内部如何聚合重要性评分，例如通过取平均("mean")。
+    # normalizer: 如何在所有组之间归一化重要性评分。
+    # bias: 是否考虑层的偏置参数。
+    # target_types: 应用重要性计算的层的类型。
     def __init__(self, 
                  p: int=2, 
                  group_reduction: str="mean", 
@@ -91,25 +126,25 @@ class GroupNormImportance(Importance):
         self.normalizer = normalizer
         self.target_types = target_types
         self.bias = bias
-
+    # 这个方法实现了LAMP（Layer-adaptive Magnitude-based Pruning）的归一化策略，通过归一化评分来适应每层的特定性质。
     def _lamp(self, scores): # Layer-adaptive Sparsity for the Magnitude-based Pruning
         """
         Normalizing scheme for LAMP.
         """
-        # sort scores in an ascending order
+        # sort scores in an ascending order # 对评分进行升序排序
         sorted_scores,sorted_idx = scores.view(-1).sort(descending=False)
-        # compute cumulative sum
+        # compute cumulative sum # 计算排序后评分的累积和
         scores_cumsum_temp = sorted_scores.cumsum(dim=0)
         scores_cumsum = torch.zeros(scores_cumsum_temp.shape,device=scores.device)
         scores_cumsum[1:] = scores_cumsum_temp[:len(scores_cumsum_temp)-1]
-        # normalize by cumulative sum
+        # normalize by cumulative sum 通过累积和对评分进行归一化处理
         sorted_scores /= (scores.sum() - scores_cumsum)
-        # tidy up and output
+        # tidy up and output 恢复原始排序
         new_scores = torch.zeros(scores_cumsum.shape,device=scores.device)
         new_scores[sorted_idx] = sorted_scores
         
         return new_scores.view(scores.shape)
-    
+    # 根据normalizer参数指定的方法来归一化给定的重要性评分。
     def _normalize(self, group_importance, normalizer):
         if normalizer is None:
             return group_importance
@@ -133,7 +168,7 @@ class GroupNormImportance(Importance):
             return self._lamp(group_importance)
         else:
             raise NotImplementedError
-
+    # 根据group_reduction参数指定的方法来聚合每个参数组内部的重要性评分。
     def _reduce(self, group_imp: typing.List[torch.Tensor], group_idxs: typing.List[typing.List[int]]):
         if len(group_imp) == 0: return group_imp
         if self.group_reduction == 'prod':
@@ -142,8 +177,10 @@ class GroupNormImportance(Importance):
             reduced_imp = torch.ones_like(group_imp[0]) * -99999
         else:
             reduced_imp = torch.zeros_like(group_imp[0])
-
+        # 根据group_reduction参数的值来聚合组内评分
         for i, (imp, root_idxs) in enumerate(zip(group_imp, group_idxs)):
+            # 各种聚合方式，包括求和、取最大值、乘积、只取第一个或最后一个的重要性等
+            # 根据root_idxs对reduced_imp进行更新
             if self.group_reduction == "sum" or self.group_reduction == "mean":
                 reduced_imp.scatter_add_(0, torch.tensor(root_idxs, device=imp.device), imp) # accumulated importance
             elif self.group_reduction == "max": # keep the max importance
@@ -164,20 +201,22 @@ class GroupNormImportance(Importance):
                 reduced_imp = torch.stack(group_imp, dim=0) # no reduction
             else:
                 raise NotImplementedError
-        
+        # 如果使用"mean"进行聚合，则对最终的重要性评分进行平均处理
         if self.group_reduction == "mean":
             reduced_imp /= len(group_imp)
         return reduced_imp
-    
+    # 这个方法使GroupNormImportance实例可以像函数一样被调用，输入参数组，返回该组的重要性评分。这个方法首先遍历给定的参数组，根据组内参数的范数计算重要性评分，然后根据指定的group_reduction和normalizer对评分进行聚合和归一化。
     @torch.no_grad()
     def __call__(self, group: Group):
         group_imp = []
         group_idxs = []
+        # 遍历参数组，计算每个组内的重要性评分
         # Iterate over all groups and estimate group importance
         for i, (dep, idxs) in enumerate(group):
             layer = dep.layer
             prune_fn = dep.pruning_fn
             root_idxs = group[i].root_idxs
+            # 根据层的类型和剪枝函数的类型，计算重要性评分
             if not isinstance(layer, tuple(self.target_types)):
                 continue
             ####################
@@ -251,15 +290,15 @@ class GroupNormImportance(Importance):
                         local_imp = layer.bias.data[idxs].abs().pow(self.p)
                         group_imp.append(local_imp)
                         group_idxs.append(root_idxs)
-
+        # 如果组内没有参数化层，返回None
         if len(group_imp) == 0: # skip groups without parameterized layers
             return None
-
+        # 使用_reduce方法聚合组内评分，然后通过_normalize方法归一化所有组的评分
         group_imp = self._reduce(group_imp, group_idxs)
         group_imp = self._normalize(group_imp, self.normalizer)
         return group_imp
 
-
+# 专注于BatchNorm（BN）层的重要性，通过考虑BN的缩放因子作为通道重要性的代理，继承自GroupNormImportance。
 class BNScaleImportance(GroupNormImportance):
     """Learning Efficient Convolutional Networks through Network Slimming, 
     https://arxiv.org/abs/1708.06519
@@ -283,7 +322,7 @@ class BNScaleImportance(GroupNormImportance):
     def __init__(self, group_reduction='mean', normalizer='mean'):
         super().__init__(p=1, group_reduction=group_reduction, normalizer=normalizer, bias=False, target_types=(nn.modules.batchnorm._BatchNorm,))
 
-
+# 采用Layer-Adaptive Magnitude-based Pruning（LAMP）方法，通过使用层特定方案来规范化重要性分数。它是GroupNormImportance的一个变种，具有专门的规范化方法。
 class LAMPImportance(GroupNormImportance):
     """Layer-adaptive Sparsity for the Magnitude-based Pruning,
     https://arxiv.org/abs/2010.07611
@@ -307,7 +346,7 @@ class LAMPImportance(GroupNormImportance):
         assert normalizer == 'lamp'
         super().__init__(p=p, group_reduction=group_reduction, normalizer=normalizer, bias=bias)
 
-
+# 代表通过几何中位数进行滤波器剪枝。它旨在基于几何中位数剪枝那些不太重要的滤波器，显示其独特的方法，评估重要性超越了简单的大小或统计措施。
 class FPGMImportance(GroupNormImportance):
     """Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration,
     http://openaccess.thecvf.com/content_CVPR_2019/papers/He_Filter_Pruning_via_Geometric_Median_for_Deep_Convolutional_Neural_Networks_CVPR_2019_paper.pdf
@@ -377,6 +416,7 @@ class FPGMImportance(GroupNormImportance):
         group_imp = self._normalize(group_imp, self.normalizer)
         return group_imp
 
+# 为每个参数随机分配重要性分数，作为基线或控制方法，以比较更复杂的重要性估计器的有效性。
 class RandomImportance(Importance):
     """ Random importance estimator
     Example:
@@ -398,7 +438,7 @@ class RandomImportance(Importance):
         _, idxs = group[0]
         return torch.rand(len(idxs))
 
-
+# 使用损失函数的一阶泰勒展开来估计参数的重要性。这种方法考虑了参数变化可能对损失的影响，提供了一种根据参数对模型性能潜在影响的优先级排序方式。
 class GroupTaylorImportance(GroupNormImportance):
     """ Grouped first-order taylor expansion of the loss function.
         https://openaccess.thecvf.com/content_CVPR_2019/papers/Molchanov_Importance_Estimation_for_Neural_Network_Pruning_CVPR_2019_paper.pdf
@@ -531,7 +571,7 @@ class GroupTaylorImportance(GroupNormImportance):
         group_imp = self._reduce(group_imp, group_idxs)
         group_imp = self._normalize(group_imp, self.normalizer)
         return group_imp
-
+# 参考Optimal Brain Damage和Optimal Brain Surgeon算法，强调Hessian（或近似）在剪枝中的作用。它为考虑网络的数学性质的更高级剪枝策略设计。
 class OBDCImportance(GroupNormImportance):
     """EigenDamage: Structured Pruning in the Kronecker-Factored Eigenbasis:
        http://proceedings.mlr.press/v97/wang19g/wang19g.pdf
@@ -649,7 +689,7 @@ class OBDCImportance(GroupNormImportance):
         group_imp = self._reduce(group_imp, group_idxs)
         group_imp = self._normalize(group_imp, self.normalizer)
         return group_imp
-
+# 与GroupTaylorImportance类似，但通过Hessian矩阵加入了二阶信息。这种方法通过考虑损失景观的曲率，为参数重要性提供了更细致的视角。
 class GroupHessianImportance(GroupNormImportance):
     """Grouped Optimal Brain Damage:
        https://proceedings.neurips.cc/paper/1989/hash/6c9882bbac1c7093bd25041881277658-Abstract.html

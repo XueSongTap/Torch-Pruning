@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import torch_pruning as tp
+import torch_pruning as tp # 引入torch_pruning库用于模型剪枝
 import engine.utils as utils
 import registry
 
@@ -49,8 +49,10 @@ parser.add_argument("--iterative-steps", default=400, type=int)
 
 args = parser.parse_args()
 
+#  函数体省略，这个函数主要用于实现模型的渐进式剪枝
 def progressive_pruning(pruner, model, speed_up, example_inputs, train_loader=None):
-    model.eval()
+    model.eval() #将模型设置为评估模式，确保在剪枝过程中模型的行为不会改变（如批量归一化层的行为）
+    # 使用tp.utils.count_ops_and_params计算剪枝前的模型运算量和参数量
     base_ops, _ = tp.utils.count_ops_and_params(model, example_inputs=example_inputs)
     current_speed_up = 1
     while current_speed_up < speed_up:
@@ -73,6 +75,7 @@ def progressive_pruning(pruner, model, speed_up, example_inputs, train_loader=No
             imp._clear_buffer()
         else:
             pruner.step()
+        # 计算剪枝后的模型运算量，并更新当前加速比
         pruned_ops, _ = tp.utils.count_ops_and_params(model, example_inputs=example_inputs)
         current_speed_up = float(base_ops) / pruned_ops
         if pruner.current_step == pruner.iterative_steps:
@@ -251,6 +254,7 @@ def get_pruner(model, example_inputs):
 
 
 def main():
+    # 设置随机种子，确保实验可复现
     if args.seed is not None:
         torch.manual_seed(args.seed)
 
@@ -317,6 +321,7 @@ def main():
             test_loader=test_loader
         )
     elif args.mode == "prune":
+        
         pruner = get_pruner(model, example_inputs=example_inputs)
         # 0. Sparsity Learning
         if args.sparsity_learning:

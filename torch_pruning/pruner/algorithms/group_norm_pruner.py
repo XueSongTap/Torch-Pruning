@@ -7,6 +7,11 @@ from .. import function
 from ..._helpers import _FlattenIndexMapping
 from ... import ops
 
+
+# 这份代码定义了一个名为GroupNormPruner的类，
+# 用于实现基于组范数的结构化剪枝策略。
+# 这个策略旨在通过调整模型参数来最小化对模型性能的影响，同时达到指定的剪枝比率。
+# GroupNormPruner类继承自MetaPruner，引入了多个参数和方法以支持高级的剪枝功能。
 class GroupNormPruner(MetaPruner):
     """DepGraph: Towards Any Structural Pruning. 
     https://openaccess.thecvf.com/content/CVPR2023/html/Fang_DepGraph_Towards_Any_Structural_Pruning_CVPR_2023_paper.html
